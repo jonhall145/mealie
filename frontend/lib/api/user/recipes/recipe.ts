@@ -43,6 +43,9 @@ const routes = {
   recipesCreateFromZip: `${prefix}/recipes/create/zip`,
   recipesCreateFromImage: `${prefix}/recipes/create/image`,
   recipesCreateFromHtmlOrJson: `${prefix}/recipes/create/html-or-json/stream`,
+  recipesCreateBatchImages: `${prefix}/recipes/create/batch-images`,
+  recipesBatchStatus: (batchId: string) => `${prefix}/recipes/create/batch-images/${batchId}/status`,
+  recipesBatchCollect: (batchId: string) => `${prefix}/recipes/create/batch-images/${batchId}/collect`,
   recipesCategory: `${prefix}/recipes/category`,
   recipesParseIngredient: `${prefix}/parser/ingredient`,
   recipesParseIngredients: `${prefix}/parser/ingredients`,
@@ -228,6 +231,40 @@ export class RecipeAPI extends BaseCRUDAPI<CreateRecipe, Recipe, Recipe> {
     }
 
     return await this.requests.post<string>(apiRoute, formData);
+  }
+
+  async createBatchFromImages(fileObjects: (Blob | File)[]) {
+    const formData = new FormData();
+    fileObjects.forEach((file) => {
+      formData.append("images", file);
+    });
+    return await this.requests.post<{
+      batch_id: string;
+      report_id: string;
+      image_dir: string;
+      image_count: number;
+    }>(routes.recipesCreateBatchImages, formData);
+  }
+
+  async getBatchStatus(batchId: string) {
+    return await this.requests.get<{
+      id: string;
+      processing_status: string;
+      request_counts: {
+        processing: number;
+        succeeded: number;
+        errored: number;
+        canceled: number;
+        expired: number;
+      };
+    }>(routes.recipesBatchStatus(batchId));
+  }
+
+  async collectBatchResults(batchId: string, reportId: string, imageDir: string) {
+    return await this.requests.post<{
+      created_recipes: string[];
+      count: number;
+    }>(`${routes.recipesBatchCollect(batchId)}?report_id=${reportId}&image_dir=${encodeURIComponent(imageDir)}`);
   }
 
   async parseIngredients(parser: Parser, ingredients: Array<string>) {

@@ -1,8 +1,11 @@
 import asyncio
+import shutil
+import tempfile
 from collections import defaultdict
 from collections.abc import AsyncIterable
+from pathlib import Path
 from shutil import copyfileobj
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import orjson
 import sqlalchemy
@@ -330,6 +333,133 @@ class RecipeController(BaseRecipeController):
         )
 
         return recipe.slug
+
+    # ==================================================================================================================
+    # Batch Image Import (Claude API)
+
+    @router.post("/create/batch-images", status_code=202)
+    async def create_recipes_from_batch_images(
+        self,
+        images: list[UploadFile] = File(...),
+    ):
+        """
+        Submit multiple images (one recipe per image) for batch processing via Claude API.
+        Returns a batch_id and report_id for polling.
+        """
+        if not self.settings.OPENAI_ENABLED:
+            raise HTTPException(
+                status_code=400,
+                detail=ErrorResponse.respond("OpenAI API key is not configured (used for Anthropic batch API)"),
+            )
+
+        from mealie.services.recipe.recipe_batch_service import RecipeBatchService
+
+        batch_service = RecipeBatchService(
+            service=self.service,
+            repos=self.repos,
+            group=self.group,
+            user=self.user,
+            household_id=self.household.id,
+            translator=self.translator,
+        )
+        report_id = batch_service.get_report_id()
+
+        # Save images to a persistent temp directory (not cleaned up until collect)
+        image_dir = Path(tempfile.mkdtemp(prefix="mealie_batch_"))
+        image_files: list[str] = []
+        for image in images:
+            filename = image.filename or f"{uuid4()}.jpg"
+            dest = image_dir / filename
+            with open(dest, "wb") as f:
+                copyfileobj(image.file, f)
+            image_files.append(filename)
+
+        try:
+            batch_id = batch_service.create_batch(image_dir, image_files)
+        except Exception as e:
+            self.logger.error(f"Failed to create batch: {e}")
+            shutil.rmtree(image_dir, ignore_errors=True)
+            raise HTTPException(
+                status_code=500,
+                detail=ErrorResponse.respond(f"Failed to submit batch: {e}"),
+            )
+
+        return {
+            "batch_id": batch_id,
+            "report_id": str(report_id),
+            "image_dir": str(image_dir),
+            "image_count": len(image_files),
+        }
+
+    @router.get("/create/batch-images/{batch_id}/status")
+    def get_batch_status(self, batch_id: str):
+        """Poll the status of a Claude batch request."""
+        if not self.settings.OPENAI_ENABLED:
+            raise HTTPException(status_code=400, detail=ErrorResponse.respond("OpenAI API key is not configured"))
+
+        from mealie.services.recipe.recipe_batch_service import RecipeBatchService
+
+        batch_service = RecipeBatchService(
+            service=self.service,
+            repos=self.repos,
+            group=self.group,
+            user=self.user,
+            household_id=self.household.id,
+            translator=self.translator,
+        )
+        try:
+            return batch_service.check_batch(batch_id)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=ErrorResponse.respond(f"Failed to check batch: {e}"))
+
+    @router.post("/create/batch-images/{batch_id}/collect")
+    def collect_batch_results(
+        self,
+        batch_id: str,
+        report_id: str = Query(...),
+        image_dir: str = Query(...),
+    ):
+        """Collect completed batch results and create recipes."""
+        if not self.settings.OPENAI_ENABLED:
+            raise HTTPException(status_code=400, detail=ErrorResponse.respond("OpenAI API key is not configured"))
+
+        from mealie.services.recipe.recipe_batch_service import RecipeBatchService
+
+        batch_service = RecipeBatchService(
+            service=self.service,
+            repos=self.repos,
+            group=self.group,
+            user=self.user,
+            household_id=self.household.id,
+            translator=self.translator,
+        )
+
+        # Restore report reference
+        report = self.repos.group_reports.get_one(UUID(report_id))
+        if not report:
+            raise HTTPException(status_code=404, detail=ErrorResponse.respond("Report not found"))
+        batch_service.report = report
+
+        image_path = Path(image_dir)
+        try:
+            slugs = batch_service.collect_results(batch_id, image_path)
+        except Exception as e:
+            self.logger.exception(e)
+            raise HTTPException(status_code=500, detail=ErrorResponse.respond(f"Failed to collect results: {e}"))
+        finally:
+            # Clean up temp images
+            shutil.rmtree(image_path, ignore_errors=True)
+
+        # Publish events for created recipes
+        for slug in slugs:
+            self.publish_event(
+                event_type=EventTypes.recipe_created,
+                document_data=EventRecipeData(operation=EventOperation.create, recipe_slug=slug),
+                group_id=self.group.id,
+                household_id=self.household.id,
+            )
+
+        return {"created_recipes": slugs, "count": len(slugs)}
 
     # ==================================================================================================================
     # CRUD Operations

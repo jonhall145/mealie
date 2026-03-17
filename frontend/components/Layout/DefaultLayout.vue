@@ -215,6 +215,15 @@ export default defineNuxtComponent({
         hide: !showImageImport.value,
       },
       {
+        insertDivider: false,
+        icon: $globals.icons.fileImage,
+        title: "Batch Image Import",
+        subtitle: "Bulk import recipes from photos (Claude)",
+        to: `/g/${groupSlug.value}/r/create/batch-images`,
+        restricted: true,
+        hide: false,
+      },
+      {
         insertDivider: true,
         icon: $globals.icons.edit,
         title: i18n.t("general.create"),
