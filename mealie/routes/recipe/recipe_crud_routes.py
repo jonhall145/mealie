@@ -3,7 +3,7 @@ import shutil
 import tempfile
 from collections import defaultdict
 from collections.abc import AsyncIterable
-from pathlib import Path
+import pathlib
 from shutil import copyfileobj
 from uuid import UUID, uuid4
 
@@ -365,7 +365,7 @@ class RecipeController(BaseRecipeController):
         report_id = batch_service.get_report_id()
 
         # Save images to a persistent temp directory (not cleaned up until collect)
-        image_dir = Path(tempfile.mkdtemp(prefix="mealie_batch_"))
+        image_dir = pathlib.Path(tempfile.mkdtemp(prefix="mealie_batch_"))
         image_files: list[str] = []
         for image in images:
             filename = image.filename or f"{uuid4()}.jpg"
@@ -440,7 +440,7 @@ class RecipeController(BaseRecipeController):
             raise HTTPException(status_code=404, detail=ErrorResponse.respond("Report not found"))
         batch_service.report = report
 
-        image_path = Path(image_dir)
+        image_path = pathlib.Path(image_dir)
         try:
             slugs = batch_service.collect_results(batch_id, image_path)
         except Exception as e:
