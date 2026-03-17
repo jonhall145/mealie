@@ -13,7 +13,7 @@ from mealie.repos.repository_factory import AllRepositories
 from mealie.schema.recipe.recipe import Recipe, create_recipe_slug
 from mealie.schema.recipe.recipe_ingredient import RecipeIngredient
 from mealie.schema.recipe.recipe_step import RecipeStep
-from mealie.schema.recipe.recipe_note import RecipeNote
+from mealie.schema.recipe.recipe_notes import RecipeNote
 from mealie.schema.reports.reports import (
     ReportCategory,
     ReportCreate,
