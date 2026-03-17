@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 from pathlib import Path
 
 import anthropic
@@ -182,58 +183,69 @@ class RecipeBatchService(BaseService):
         self.report.entries = new_entries
         self.repos.group_reports.update(self.report.id, self.report)
 
-    def create_batch(self, image_dir: Path, image_files: list[str]) -> str:
+    @staticmethod
+    def _sanitize_custom_id(filename: str, index: int) -> str:
+        """Create a batch-API-safe custom_id from a filename."""
+        # Strip extension, replace non-alphanumeric with underscore, truncate
+        stem = Path(filename).stem
+        safe = re.sub(r"[^a-zA-Z0-9_-]", "_", stem)[:50]
+        return f"{index:03d}_{safe}" if safe else f"{index:03d}_image"
+
+    def create_batch(self, image_dir: Path, image_files: list[str]) -> tuple[str, dict[str, str]]:
         """
         Submit a Claude Message Batch for all images.
-        Returns the batch ID for polling.
+        Returns (batch_id, id_to_filename mapping).
         """
         client = self._get_client()
 
-        requests = []
-        for filename in image_files:
+        batch_requests = []
+        id_to_filename: dict[str, str] = {}
+
+        for i, filename in enumerate(image_files):
             image_path = image_dir / filename
             if not image_path.exists():
                 logger.warning(f"Image file not found: {image_path}")
                 continue
 
             b64_data = _image_to_base64(image_path)
-            requests.append(
-                anthropic.types.message_create_params.MessageCreateParamsNonStreaming(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=4096,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": "image/jpeg",
-                                        "data": b64_data,
+            custom_id = self._sanitize_custom_id(filename, i)
+            id_to_filename[custom_id] = filename
+
+            batch_requests.append(
+                anthropic.types.messages.batch_create_params.Request(
+                    custom_id=custom_id,
+                    params=anthropic.types.message_create_params.MessageCreateParamsNonStreaming(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=4096,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": "image/jpeg",
+                                            "data": b64_data,
+                                        },
                                     },
-                                },
-                                {
-                                    "type": "text",
-                                    "text": "Please extract the recipe from this image. Respond with JSON only.",
-                                },
-                            ],
-                        }
-                    ],
-                    system=SYSTEM_PROMPT,
+                                    {
+                                        "type": "text",
+                                        "text": "Please extract the recipe from this image. Respond with JSON only.",
+                                    },
+                                ],
+                            }
+                        ],
+                        system=SYSTEM_PROMPT,
+                    ),
                 )
             )
 
-        batch_requests = [
-            anthropic.types.messages.batch_create_params.Request(
-                custom_id=image_files[i],
-                params=req,
-            )
-            for i, req in enumerate(requests)
-        ]
+        if not batch_requests:
+            raise ValueError("No valid images to process")
 
         batch = client.messages.batches.create(requests=batch_requests)
-        return batch.id
+        return batch.id, id_to_filename
 
     def check_batch(self, batch_id: str) -> dict:
         """Check batch status. Returns status info."""
@@ -251,7 +263,7 @@ class RecipeBatchService(BaseService):
             },
         }
 
-    def collect_results(self, batch_id: str, image_dir: Path) -> list[str]:
+    def collect_results(self, batch_id: str, image_dir: Path, id_to_filename: dict[str, str]) -> list[str]:
         """
         Collect batch results, create recipes, and save images.
         Returns list of created recipe slugs.
@@ -262,7 +274,8 @@ class RecipeBatchService(BaseService):
         created_slugs: list[str] = []
 
         for result in client.messages.batches.results(batch_id):
-            filename = result.custom_id
+            custom_id = result.custom_id
+            filename = id_to_filename.get(custom_id, custom_id)
             try:
                 if result.result.type != "succeeded":
                     error_msg = f"Batch request failed for {filename}: {result.result.type}"

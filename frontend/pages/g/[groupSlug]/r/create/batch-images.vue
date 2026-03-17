@@ -209,6 +209,7 @@ export default defineNuxtComponent({
     const batchId = ref<string | null>(null);
     const reportId = ref<string | null>(null);
     const imageDir = ref<string | null>(null);
+    const idToFilename = ref<Record<string, string>>({});
     const batchStatus = ref<{
       id: string;
       processing_status: string;
@@ -274,6 +275,7 @@ export default defineNuxtComponent({
       batchId.value = data.batch_id;
       reportId.value = data.report_id;
       imageDir.value = data.image_dir;
+      idToFilename.value = data.id_to_filename;
       submitting.value = false;
 
       // Start polling
@@ -305,6 +307,7 @@ export default defineNuxtComponent({
         batchId.value,
         reportId.value,
         imageDir.value,
+        idToFilename.value,
       );
 
       if (error || !data) {
@@ -327,6 +330,7 @@ export default defineNuxtComponent({
       batchId.value = null;
       reportId.value = null;
       imageDir.value = null;
+      idToFilename.value = {};
       batchStatus.value = null;
       batchDone.value = false;
       collecting.value = false;

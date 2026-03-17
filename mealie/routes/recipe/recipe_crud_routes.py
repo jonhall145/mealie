@@ -375,7 +375,7 @@ class RecipeController(BaseRecipeController):
             image_files.append(filename)
 
         try:
-            batch_id = batch_service.create_batch(image_dir, image_files)
+            batch_id, id_to_filename = batch_service.create_batch(image_dir, image_files)
         except Exception as e:
             self.logger.error(f"Failed to create batch: {e}")
             shutil.rmtree(image_dir, ignore_errors=True)
@@ -389,6 +389,7 @@ class RecipeController(BaseRecipeController):
             "report_id": str(report_id),
             "image_dir": str(image_dir),
             "image_count": len(image_files),
+            "id_to_filename": id_to_filename,
         }
 
     @router.get("/create/batch-images/{batch_id}/status")
@@ -418,10 +419,18 @@ class RecipeController(BaseRecipeController):
         batch_id: str,
         report_id: str = Query(...),
         image_dir: str = Query(...),
+        id_to_filename: str = Query("{}"),
     ):
         """Collect completed batch results and create recipes."""
         if not self.settings.OPENAI_ENABLED:
             raise HTTPException(status_code=400, detail=ErrorResponse.respond("OpenAI API key is not configured"))
+
+        import json as _json
+
+        try:
+            filename_map = _json.loads(id_to_filename)
+        except Exception:
+            filename_map = {}
 
         from mealie.services.recipe.recipe_batch_service import RecipeBatchService
 
@@ -442,7 +451,7 @@ class RecipeController(BaseRecipeController):
 
         image_path = pathlib.Path(image_dir)
         try:
-            slugs = batch_service.collect_results(batch_id, image_path)
+            slugs = batch_service.collect_results(batch_id, image_path, filename_map)
         except Exception as e:
             self.logger.exception(e)
             raise HTTPException(status_code=500, detail=ErrorResponse.respond(f"Failed to collect results: {e}"))

@@ -243,6 +243,7 @@ export class RecipeAPI extends BaseCRUDAPI<CreateRecipe, Recipe, Recipe> {
       report_id: string;
       image_dir: string;
       image_count: number;
+      id_to_filename: Record<string, string>;
     }>(routes.recipesCreateBatchImages, formData);
   }
 
@@ -260,11 +261,11 @@ export class RecipeAPI extends BaseCRUDAPI<CreateRecipe, Recipe, Recipe> {
     }>(routes.recipesBatchStatus(batchId));
   }
 
-  async collectBatchResults(batchId: string, reportId: string, imageDir: string) {
+  async collectBatchResults(batchId: string, reportId: string, imageDir: string, idToFilename: Record<string, string>) {
     return await this.requests.post<{
       created_recipes: string[];
       count: number;
-    }>(`${routes.recipesBatchCollect(batchId)}?report_id=${reportId}&image_dir=${encodeURIComponent(imageDir)}`);
+    }>(`${routes.recipesBatchCollect(batchId)}?report_id=${reportId}&image_dir=${encodeURIComponent(imageDir)}&id_to_filename=${encodeURIComponent(JSON.stringify(idToFilename))}`);
   }
 
   async parseIngredients(parser: Parser, ingredients: Array<string>) {
