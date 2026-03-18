@@ -109,19 +109,22 @@ def _convert_recipe(data: dict, user: PrivateUser, household_id: UUID4) -> Recip
         prep_time=data.get("prep_time"),
         perform_time=data.get("perform_time"),
         recipe_ingredient=[
-            RecipeIngredient(title=ing.get("title"), note=ing.get("text", ""))
+            RecipeIngredient(title=None, note=ing) if isinstance(ing, str)
+            else RecipeIngredient(title=ing.get("title"), note=ing.get("text", ""))
             for ing in data.get("ingredients", [])
-            if ing.get("text")
+            if (ing if isinstance(ing, str) else ing.get("text"))
         ],
         recipe_instructions=[
-            RecipeStep(title=ins.get("title"), text=ins.get("text", ""))
+            RecipeStep(title=None, text=ins) if isinstance(ins, str)
+            else RecipeStep(title=ins.get("title"), text=ins.get("text", ""))
             for ins in data.get("instructions", [])
-            if ins.get("text")
+            if (ins if isinstance(ins, str) else ins.get("text"))
         ],
         notes=[
-            RecipeNote(title=note.get("title") or "", text=note.get("text", ""))
+            RecipeNote(title="", text=note) if isinstance(note, str)
+            else RecipeNote(title=note.get("title") or "", text=note.get("text", ""))
             for note in data.get("notes", [])
-            if note.get("text")
+            if (note if isinstance(note, str) else note.get("text"))
         ],
     )
 
